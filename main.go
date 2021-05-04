@@ -2,10 +2,12 @@ package main
 
 import (
 	"fmt"
+	"image/jpeg"
 	"log"
 	"os"
 	"path/filepath"
 
+	"github.com/nfnt/resize"
 	"github.com/thatisuday/commando"
 )
 
@@ -92,5 +94,31 @@ func ProcessFile(imagePath string) error {
 }
 
 func CreateThumbnails(thumbDir string, imagePath string) error {
+	src, err := os.Open(imagePath)
+	if err != nil {
+		return err
+	}
+
+	img, err := jpeg.Decode(src)
+	if err != nil {
+		return err
+	}
+
+	src.Close()
+
+	m := resize.Resize(1280, 0, img, resize.Lanczos3)
+
+	dstPath := filepath.Join(thumbDir, "SYNOPHOTO_THUMB_XL.jpg")
+	out, err := os.Create(dstPath)
+	if err != nil {
+		return err
+	}
+
+	defer out.Close()
+
+	jpeg.Encode(out, m, nil)
+
+	fmt.Println("Image generated", dstPath)
+
 	return nil
 }
