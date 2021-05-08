@@ -2,12 +2,14 @@ package main
 
 import (
 	"fmt"
-	"image/jpeg"
+	"image"
+	"image/color"
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 
-	"github.com/nfnt/resize"
+	"github.com/disintegration/imaging"
 	"github.com/thatisuday/commando"
 )
 
@@ -26,7 +28,7 @@ func commandoConfig() {
 		AddFlag("dir", "scans local path for images", commando.String, "./").
 		SetAction(func(args map[string]commando.ArgValue, flags map[string]commando.FlagValue) {
 			directory, _ := flags["dir"].GetString()
-			_, err := ProcessDirectory(directory)
+			err := filepath.Walk(directory, ProcessFile)
 
 			if err != nil {
 				log.Fatal(err)
@@ -36,43 +38,34 @@ func commandoConfig() {
 	commando.Parse(nil)
 }
 
-func ProcessDirectory(directory string) ([]string, error) {
-	var matches []string
-
-	err := filepath.Walk(directory, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-
-		if info.IsDir() {
-			return nil
-		}
-
-		matched, err := filepath.Match("*.[jJ][pP][gG]", filepath.Base(path))
-		if err != nil {
-			return err
-		} else if matched {
-			matches = append(matches, path)
-			err = ProcessFile(path)
-
-			if err != nil {
-				return err
-			}
-		}
-
-		return nil
-	})
-
+func ProcessFile(path string, info os.FileInfo, err error) error {
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	return matches, nil
+	if info.IsDir() {
+		return nil
+	}
+
+	if strings.Contains(path, "@eaDir") {
+		return nil
+	}
+
+	matched, err := filepath.Match("*.[jJ][pP]*[gG]", filepath.Base(path))
+	if err != nil {
+		return err
+	} else if matched {
+		err = ProcessImage(path)
+
+		if err != nil {
+			fmt.Println("ERROR: Image not processed", path)
+		}
+	}
+
+	return nil
 }
 
-func ProcessFile(imagePath string) error {
-	fmt.Println("Processing", imagePath)
-
+func ProcessImage(imagePath string) error {
 	path, filename := filepath.Split(imagePath)
 	thumbDir := filepath.Join(path, "@eaDir", filename)
 
@@ -88,37 +81,51 @@ func ProcessFile(imagePath string) error {
 		return err
 	}
 
-	fmt.Println("Thumbnails generated for", imagePath)
+	fullImagePath := filepath.Join(thumbDir, imagePath)
+	fmt.Println("Thumbnails generated for", fullImagePath)
 
 	return nil
 }
 
+func ImageThumbnailSizesAndWidths() map[string]int {
+	return map[string]int{
+		"SYNOPHOTO_THUMB_XL.jpg": 1280,
+		"SYNOPHOTO_THUMB_SM.jpg": 320,
+		"SYNOPHOTO_THUMB_M.jpg":  240,
+	}
+}
+
+func VideoThumbnailSizesAndWidths() map[string]int {
+	return map[string]int{
+		"SYNOPHOTO_THUMB_XL.jpg": 1280,
+		"SYNOPHOTO_THUMB_SM.jpg": 320,
+		"SYNOPHOTO_THUMB_M.jpg":  240,
+	}
+}
+
 func CreateThumbnails(thumbDir string, imagePath string) error {
-	src, err := os.Open(imagePath)
+	src, err := imaging.Open(imagePath, imaging.AutoOrientation(true))
 	if err != nil {
 		return err
 	}
 
-	img, err := jpeg.Decode(src)
-	if err != nil {
-		return err
+	for dstFilename, dstMaxSize := range ImageThumbnailSizesAndWidths() {
+		var m *image.NRGBA
+
+		if src.Bounds().Size().X > src.Bounds().Size().Y {
+			m = imaging.Resize(src, dstMaxSize, 0, imaging.Lanczos)
+		} else {
+			m = imaging.Resize(src, 0, dstMaxSize, imaging.Lanczos)
+		}
+
+		dst := imaging.New(m.Bounds().Size().X, m.Bounds().Size().Y, color.NRGBA{0, 0, 0, 0})
+		dst = imaging.Paste(dst, m, image.Pt(0, 0))
+
+		err = imaging.Save(dst, filepath.Join(thumbDir, dstFilename))
+		if err != nil {
+			return err
+		}
 	}
-
-	src.Close()
-
-	m := resize.Resize(1280, 0, img, resize.Lanczos3)
-
-	dstPath := filepath.Join(thumbDir, "SYNOPHOTO_THUMB_XL.jpg")
-	out, err := os.Create(dstPath)
-	if err != nil {
-		return err
-	}
-
-	defer out.Close()
-
-	jpeg.Encode(out, m, nil)
-
-	fmt.Println("Image generated", dstPath)
 
 	return nil
 }
